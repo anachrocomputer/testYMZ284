@@ -74,9 +74,10 @@ void loop(void)
 
   ana = analogRead(1);
   
-  //aywrite(0, ana & 0xff);
-  //aywrite(1, ana >> 8);
+  aywrite(0, ana & 0xff);
+  aywrite(1, ana >> 8);
 
+  delay(20);
 }
 
 void aywrite(int reg, int val)
@@ -89,8 +90,9 @@ void ymzwrite(int a0, int val)
 {
   int i;
 
+#ifdef SLOW
   digitalWrite(A0_PIN, a0);
-  
+
   for (i = 0; i < 8; i++) {
     if (val & (1 << i))
       digitalWrite(D0_PIN + i, HIGH);
@@ -104,12 +106,35 @@ void ymzwrite(int a0, int val)
   // WR LOW
   digitalWrite(WR_PIN, LOW);
 
-  //delayMicroseconds(1);
-  
   // WR HIGH
   digitalWrite(WR_PIN, HIGH);
 
   // CS HIGH
   digitalWrite(CS_PIN, HIGH);
+#else
+  // A0 on Arduino Pin 5, Port D bit 5
+  if (a0)
+    PORTD |= (1 << 5);
+  else
+    PORTD &= ~(1 << 5);
+
+  // D0-D1 on Port D bits 6 and 7; D2-D7 on Port B bits 0-5
+  PORTD = (PORTD & 0x3f) | ((val & 0x03) << 6);
+  PORTB = val >> 2;
+
+  // CS on Arduino Pin 2, Port D bit 2
+  PORTD &= ~(1 << 2);
+
+  // WR on Arduino Pin 4, Port D bit 4
+  PORTD &= ~(1 << 4);
+
+  // Minimum CS LOW time is 30ns; no need for NOP here
+  
+  // WR on Arduino Pin 4, Port D bit 4
+  PORTD |= (1 << 4);
+
+  // CS on Arduino Pin 2, Port D bit 2
+  PORTD |= (1 << 2);
+#endif
 }
 
