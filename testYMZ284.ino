@@ -7,11 +7,77 @@
 #define A0_PIN    (5)
 #define D0_PIN    (6)
 
+#define TONEPERIODA_REG     (0)
+#define TONEPERIODB_REG     (2)
+#define TONEPERIODC_REG     (4)
+#define NOISEPERIOD_REG     (6)
+#define ENABLE_REG          (7)
+#define AMPLITUDEA_REG      (8)
+#define AMPLITUDEB_REG      (9)
+#define AMPLITUDEC_REG      (10)
+#define ENVELOPEPERIOD_REG  (11)
+#define ENVELOPEMODE_REG    (13)
+#define IOPORTA_REG         (14)  // AY-3-8910 only; not present on YMZ284
+#define IOPORTB_REG         (15)
+
+#define CHANNELA  (0)
+#define CHANNELB  (1)
+#define CHANNELC  (2)
+
+#define IOPORTA   (0)
+#define IOPORTB   (1)
+
+#define AMPLITUDE_ENV (16)
+#define AMPLITUDE_MAX (15)
+#define AMPLITUDE_OFF (0)
+
+#define ENV_CONT    (8)
+#define ENV_ATTACK  (4)
+#define ENV_ALT     (2)
+#define ENV_HOLD    (1)
+
+
+uint8_t EnableReg = 0;
+
 void setup(void)
 {
   int i;
 
   Serial.begin(9600);
+
+  initPSG();
+
+  setTonePeriod(CHANNELA, 142);  // (2000000 / 32) / frequency
+  setNoisePeriod(15);
+  setToneEnable(CHANNELA, true);
+  setAmplitude(CHANNELA, AMPLITUDE_ENV);
+  setAmplitude(CHANNELB, AMPLITUDE_OFF);  
+  setAmplitude(CHANNELC, AMPLITUDE_OFF);
+  setEnvelopePeriod(1024);
+  setEnvelopeMode(ENV_CONT | ENV_ALT);
+}
+
+void loop(void)
+{
+  int ana;
+
+  ana = analogRead(0);
+
+  setEnvelopePeriod(ana);
+
+  ana = analogRead(1);
+  
+  setTonePeriod(CHANNELA, ana);
+
+  delay(20);
+}
+
+
+/* initPSG --- initialise chip and disable all noise and tone channels */
+
+void initPSG(void)
+{
+  int i;
 
   // Generate 2MHz clock on Pin 3
   pinMode(CLK_PIN, OUTPUT);
@@ -20,7 +86,7 @@ void setup(void)
   OCR2A = 7;
   OCR2B = 1;
 
-  delay(50);
+  delay(10);
   
   // Chip Select pin
   pinMode(CS_PIN, OUTPUT);
@@ -39,54 +105,127 @@ void setup(void)
     pinMode(i, OUTPUT);
     digitalWrite(i, LOW);
   }
-
-  //for (i = 0; i <= 0x0d; i++) {
-  //  if (i == 7)
-  //    aywrite(i, 0x3f);
-  //  else
-  //    aywrite(i, 0);
-  //}
-
-  aywrite(15, 0);
-  aywrite(0, 142);  // (2000000 / 32) / frequency
-  aywrite(1, 0);
-  //aywrite(2, 255);
-  //aywrite(0, 64);
-  aywrite(6, 15);   // Noise
-  aywrite(7, 0x3e); // Channel enables
-  aywrite(8, 16);   // Channel amplitudes
-  aywrite(9, 0);  
-  aywrite(10, 0);
-  aywrite(11, 0);   // Envelope period
-  aywrite(12, 4);
-  aywrite(13, 10);
-  //aywrite(10, 15);
-}
-
-void loop(void)
-{
-  int ana;
-
-  ana = analogRead(0);
-
-  aywrite(11, ana & 0xff);
-  aywrite(12, ana >> 8);
-
-  ana = analogRead(1);
   
-  aywrite(0, ana & 0xff);
-  aywrite(1, ana >> 8);
+  EnableReg = 0x3f; // All noise and tone channels disabled
 
-  delay(20);
+  aywrite(ENABLE_REG, EnableReg);
+  aywrite(IOPORTB_REG, 0);
 }
 
-void aywrite(int reg, int val)
+
+/* setToneEnable --- enable or disable tone generation on a given channel */
+
+void setToneEnable(const int channel, const int enable)
+{
+  const uint8_t mask = 1 << channel;
+
+  if (enable) {
+    EnableReg &= ~mask;
+  }
+  else {
+    EnableReg |= mask;
+  }
+
+  aywrite(ENABLE_REG, EnableReg);
+}
+
+
+/* setNoiseEnable --- enable or disable noise generation on a given channel */
+
+void setNoiseEnable(const int channel, const int enable)
+{
+  const uint8_t mask = 1 << (3 + channel);
+
+  if (enable) {
+    EnableReg &= ~mask;
+  }
+  else {
+    EnableReg |= mask;
+  }
+
+  aywrite(ENABLE_REG, EnableReg);
+}
+
+
+/* setPortDirection --- set I/O port to input or output */
+
+void setPortDirection(const int channel, const int direction)
+{
+  const uint8_t mask = 1 << (6 + channel);
+
+  if (direction == INPUT) {
+    EnableReg &= ~mask;
+  }
+  else if (direction == OUTPUT) {
+    EnableReg |= mask;
+  }
+
+  aywrite(ENABLE_REG, EnableReg);
+}
+
+
+/* setPortOutputs --- send a byte to the output port pins */
+
+void setPortOutputs(const int channel, const int val)
+{
+  aywrite(IOPORTA_REG + channel, val);
+}
+
+
+/* setAmplitude --- set amplitude for a given channel */
+
+void setAmplitude(const int channel, const int amplitude)
+{
+  aywrite(AMPLITUDEA_REG + channel, amplitude);
+}
+
+
+/* setTonePeriod --- set tone period for a given channel */
+
+void setTonePeriod(const int channel, const unsigned int period)
+{
+  aywrite(TONEPERIODA_REG + (channel * 2), period & 0xff);
+  aywrite(TONEPERIODA_REG + (channel * 2) + 1, period >> 8);
+}
+
+
+/* setNoisePeriod --- set period of the noise generator */
+
+void setNoisePeriod(const int period)
+{
+  aywrite(NOISEPERIOD_REG, period);
+}
+
+
+/* setEnvelopePeriod --- set period of envelope generator */
+
+void setEnvelopePeriod(const unsigned int envelope)
+{
+  aywrite(ENVELOPEPERIOD_REG, envelope & 0xff);
+  aywrite(ENVELOPEPERIOD_REG + 1, envelope >> 8);
+}
+
+
+/* setEnvelopeMode --- set mode of envelope generator */
+
+void setEnvelopeMode(const unsigned int mode)
+{
+  aywrite(ENVELOPEMODE_REG, mode);
+}
+
+
+/* aywrite --- write a byte to a given register in the PSG */
+
+void aywrite(const int reg, const int val)
 {
   ymzwrite(LOW, reg);
   ymzwrite(HIGH, val);
 }
 
-void ymzwrite(int a0, int val)
+
+/* ymzwrite --- emulate a bus cycle to write a single byte to the chip */
+
+void ymzwrite(const int a0, const int val)
 {
   int i;
 
